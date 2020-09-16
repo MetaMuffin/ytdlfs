@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
-use std::sync::atomic::AtomicI64;
+
 use std::sync::Mutex;
 use std::collections::HashMap;
 use std::env;
@@ -8,15 +8,15 @@ use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
 use libc::{ENOENT,ENETUNREACH};
 use fuse::{FileType, FileAttr, Filesystem, Request, ReplyData, ReplyEntry, ReplyAttr, ReplyDirectory};
-use std::process::Command;
-use std::cmp::min;
+
+mod dlstream;
 
 #[macro_use]
 extern crate lazy_static;
 
 const TTL: Duration = Duration::from_secs(1);           // 1 second
 
-const HELLO_DIR_ATTR: FileAttr = FileAttr {
+const DIR_ATTR: FileAttr = FileAttr {
     ino: 1,
     size: 0,
     blocks: 0,
@@ -52,34 +52,15 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
 };
 
 struct Ytdlfs;
-/*
-fn b64d(s:&str) -> Option<u64> {
-    let mut i: u64 = 0;
-    let mut count = 0;
-    let alpha = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_";
-    for c in s.chars() {
-        let v = match alpha.find(c) {
-            Some(v) => v,
-            None => { return None }
-        } as u32;
-        i += (v * u32::pow(alpha.len() as u32,v)) as u64;
-        count += 1;
-    }
-    return Some(i);
-}
-fn b64e(i:i64) -> String {
-    
-}*/
 
 lazy_static! {
     static ref INODES: Mutex<HashMap<u64, String>> = {
-        let mut m = HashMap::new();
-        
+        let m = HashMap::new();
         Mutex::new(m)
     };
 }
-
 static COUNTER: AtomicU64 = AtomicU64::new(5);
+
 
 impl Filesystem for Ytdlfs {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
@@ -93,7 +74,7 @@ impl Filesystem for Ytdlfs {
             let attr = FileAttr {
                 ino: ino,
                 size: 1000000,
-                blocks: 22,
+                blocks: 2000,
                 atime: UNIX_EPOCH,
                 mtime: UNIX_EPOCH,
                 ctime: UNIX_EPOCH,
@@ -114,30 +95,27 @@ impl Filesystem for Ytdlfs {
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         match ino {
-            1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
+            1 => reply.attr(&TTL, &DIR_ATTR),
             2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
             _ => reply.error(ENOENT),
         }
     }
 
     fn read(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, size: u32, reply: ReplyData) {
-        
-        let mut pro = Command::new("/bin/youtube-dl");
         let map = INODES.lock().unwrap();
         let id = map.get(&ino);
-        pro.arg("-f").arg("250").arg(format!("https://www.youtube.com/watch?v={0}",id)).arg("-o").arg("-");
-        let data = match pro.output() {
-            Ok(d) => d.stdout,
-            Err(_e) => return reply.error(ENETUNREACH),
-        };
-        if ino == 2 {
-            let start = offset as usize;
-            let stop = min(start + (size as usize), data.len());
-            
-            reply.data(&data[start..stop]);
-        } else {
-            reply.error(ENOENT);
-        }
+        let url = format!("https://www.youtube.com/watch?v={0}", match id {
+            Some(i) => {
+                println!("Request for '{0}'",i);
+                i
+            },
+            None => {
+                reply.error(ENETUNREACH);
+                return
+            }
+        });
+        dlstream::reply_read(reply, url, offset, size);
+       
     }
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
@@ -149,7 +127,6 @@ impl Filesystem for Ytdlfs {
         let entries = vec![
             (1, FileType::Directory, "."),
             (1, FileType::Directory, ".."),
-            (2, FileType::RegularFile, "test.webm"),
         ];
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
@@ -162,7 +139,7 @@ impl Filesystem for Ytdlfs {
 
 fn main() {
     let mountpoint = env::args_os().nth(1).unwrap();
-    let options = ["-o", "ro", "-o", "fsname=hello"]
+    let options = ["-o", "ro", "-o", "fsname=ytdlfs"]
         .iter()
         .map(|o| o.as_ref())
         .collect::<Vec<&OsStr>>();
