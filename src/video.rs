@@ -44,8 +44,12 @@ impl DlStream {
     }
 }
 
+pub fn video_url(id: &String) -> String {
+    return format!("https://www.youtube.com/watch?v={0}",id);
+}
 
-pub fn reply_read(reply: ReplyData, url: String, offset: i64, size: u32) {
+pub fn video_reply(reply: ReplyData, id: &String, offset: i64, size: u32) {
+    let url = video_url(&id);
     let mut streams_lock = STREAMS.lock().unwrap();
     let mut cached_lock = CACHED.lock().unwrap();
     if let None = streams_lock.get(&url) {
