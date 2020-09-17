@@ -1,17 +1,19 @@
-use std::hash::Hasher;
-use std::collections::hash_map::DefaultHasher;
 
+
+use libc::ENETUNREACH;
 use std::sync::Mutex;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
-use std::{hash::Hash, time::{Duration, UNIX_EPOCH}};
+use std::{time::{Duration, UNIX_EPOCH}};
 use libc::{ENOENT};
 use fuse::{FileType, FileAttr, Filesystem, Request, ReplyData, ReplyEntry, ReplyAttr, ReplyDirectory};
 
 mod video;
 mod channel;
 mod playlist;
+mod helper;
+use helper::indode_of_path;
 
 #[macro_use]
 extern crate lazy_static;
@@ -58,7 +60,8 @@ struct Ytdlfs;
 pub enum FsContent {
     Video(String),
     ChannelDir(String),
-    Playlist(String)
+    PlaylistDir(String),
+    PlaylistSym(String,String),
 }
 
 lazy_static! {
@@ -68,14 +71,10 @@ lazy_static! {
     };
 }
 
-pub fn indode_of_path(p: &OsStr) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    p.hash(&mut hasher);
-    hasher.finish()
-}
 
 impl Filesystem for Ytdlfs {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        println!("Request for inode of {:?} from {}",name,parent);
         let mut map = INODES.lock().unwrap();
         if parent == 1 {
             let ino = match name.to_str().expect("Could not convert OsStr to str") {
@@ -87,20 +86,9 @@ impl Filesystem for Ytdlfs {
                 }
             };
             let attr = FileAttr {
-                ino: ino,
-                size: 4096,
-                blocks: 1,
-                atime: UNIX_EPOCH,
-                mtime: UNIX_EPOCH,
-                ctime: UNIX_EPOCH,
-                crtime: UNIX_EPOCH,
-                kind: FileType::Directory,
-                perm: 0o644,
-                nlink: 1,
-                uid: 501,
-                gid: 20,
-                rdev: 0,
-                flags: 0,
+                ino: ino, size: 4096, blocks: 1,
+                atime: UNIX_EPOCH, mtime: UNIX_EPOCH, ctime: UNIX_EPOCH, crtime: UNIX_EPOCH,
+                kind: FileType::Directory, perm: 0o644, nlink: 1, uid: 501, gid: 20, rdev: 0, flags: 0,
             };
             reply.entry(&TTL, &attr, 0);
         } else if parent == 2 {
@@ -109,24 +97,45 @@ impl Filesystem for Ytdlfs {
 
             
             let attr = FileAttr {
-                ino: ino,
-                size: 1000000,
-                blocks: 2000,
-                atime: UNIX_EPOCH,
-                mtime: UNIX_EPOCH,
-                ctime: UNIX_EPOCH,
-                crtime: UNIX_EPOCH,
-                kind: FileType::RegularFile,
-                perm: 0o644,
-                nlink: 1,
-                uid: 501,
-                gid: 20,
-                rdev: 0,
-                flags: 0,
+                ino: ino, size: 1000000, blocks: 1,
+                atime: UNIX_EPOCH, mtime: UNIX_EPOCH, ctime: UNIX_EPOCH, crtime: UNIX_EPOCH,
+                kind: FileType::RegularFile, perm: 0o644, nlink: 1, uid: 501, gid: 20, rdev: 0, flags: 0,
+            };
+            reply.entry(&TTL, &attr, 0);
+        } else if parent == 4 { // A playlist folder
+            let ino = indode_of_path(name);
+            map.insert(ino, FsContent::PlaylistDir(String::from(name.to_str().unwrap())));
+            
+            let attr = FileAttr {
+                ino: ino, size: 4096, blocks: 1,
+                atime: UNIX_EPOCH, mtime: UNIX_EPOCH, ctime: UNIX_EPOCH, crtime: UNIX_EPOCH,
+                kind: FileType::Directory, perm: 0o644, nlink: 1, uid: 501, gid: 20, rdev: 0, flags: 0,
             };
             reply.entry(&TTL, &attr, 0);
         } else {
-            reply.error(ENOENT);
+            let mut content_o = None;
+            {
+                content_o = map.get(&parent);
+            }
+            if let Some(content) = content_o {
+                if let FsContent::PlaylistDir(pl_id) = content {
+                    
+                    let ino = indode_of_path(name);
+                    map.insert(ino, FsContent::Video(String::from(name.to_str().unwrap())));
+                    //  map.insert(ino, FsContent::PlaylistSym(String::from(pl_id),String::from(name.to_str().unwrap())));,
+                    
+                    let attr = FileAttr {
+                        ino: ino, size: 1000000, blocks: 1,
+                        atime: UNIX_EPOCH, mtime: UNIX_EPOCH, ctime: UNIX_EPOCH, crtime: UNIX_EPOCH,
+                        kind: FileType::RegularFile, perm: 0o644, nlink: 1, uid: 501, gid: 20, rdev: 0, flags: 0,
+                    };
+                    reply.entry(&TTL, &attr, 0);
+                } else {
+                    reply.error(ENETUNREACH)
+                }
+            } else {
+                reply.error(ENOENT)
+            }
         }
     }
 
@@ -160,7 +169,7 @@ impl Filesystem for Ytdlfs {
         if ino != 1 {
             let map = INODES.lock().unwrap();
             if let Some(content) = map.get(&ino) {
-                if let FsContent::ChannelDir(ch_id) = content {
+                if let FsContent::PlaylistDir(ch_id) = content {
                     playlist::playlist_dir_reply(reply, offset, ch_id);
                 } else { reply.error(ENOENT) }
             } else { reply.error(ENOENT) }
@@ -177,6 +186,10 @@ impl Filesystem for Ytdlfs {
             reply.ok();
         }
 
+    }
+
+    fn readlink(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyData) {
+        println!("{:?}",ino);
     }
 }
 
