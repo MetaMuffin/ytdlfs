@@ -273,5 +273,6 @@ dependencies = [
  "log",
  "num-derive",
  "num-traits",
+ "regex",
  "thread-scoped",
 ]

@@ -1,5 +1,6 @@
 
 
+use regex::Regex;
 use std::sync::Arc;
 use std::process::ChildStdout;
 use std::sync::Mutex;
@@ -29,7 +30,9 @@ pub struct DlStream {
 impl DlStream {
     pub fn new(url: &String) -> Result<DlStream, std::io::Error> {
         let mut comm = Command::new("/bin/youtube-dl");
-        comm.arg("-f").arg("250").arg(url).arg("-o").arg("-").stdout(Stdio::piped());
+        //comm.arg("-f").arg("250").arg(url).arg("-o").arg("-").stdout(Stdio::piped());
+        println!("Downloading from url {0}",url);
+        comm.arg("-x").arg(url).arg("-o").arg("-").stdout(Stdio::piped());
         let proc = comm.spawn()?;
         let out = proc.stdout.unwrap();
         let reader = BufReader::new(out);
@@ -47,6 +50,18 @@ impl DlStream {
 pub fn video_url(id: &String) -> String {
     return format!("https://www.youtube.com/watch?v={0}",id);
 }
+
+pub fn id_from_url(url: String) -> Option<String> {
+    println!("{:?}",url);
+    let re = Regex::new(r"https?://www\.youtube\.com/watch\?v=(.{12})").unwrap();
+    if let Some(caps) = re.captures(&url) {
+        let ret = caps.get(1).map_or(None, |m| Some(String::from(m.as_str())));
+        println!("{:?}",ret);
+        return ret;
+    } else { None }
+
+}
+
 
 pub fn video_reply(reply: ReplyData, id: &String, offset: i64, size: u32) {
     let url = video_url(&id);

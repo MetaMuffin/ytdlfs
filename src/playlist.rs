@@ -1,4 +1,6 @@
 
+use crate::video::id_from_url;
+use crate::INODES;
 use std::ffi::OsStr;
 use crate::indode_of_path;
 use std::process::Command;
@@ -10,16 +12,20 @@ pub fn playlist_url(id: &String) -> String {
     return format!("https://www.youtube.com/playlist?list={0}",id);
 }
 
-pub fn playlist_dir_reply(mut reply: ReplyDirectory, offset: i64, pl_id: &String) {
+pub fn playlist_dir_reply(mut reply: ReplyDirectory, offset: i64, pl_id: &String, file_ext: &Option<String>) {
     let mut entries = vec![
         (2, FileType::Directory, String::from(".")),
         (2, FileType::Directory, String::from("..")),
     ];
     let url = playlist_url(pl_id);
     let vids = get_playlist_elements(&url);
-
+    
     for v in vids {
-        let v_ent = (indode_of_path(OsStr::new(&v)),FileType::Symlink, v);
+        let mut name = String::from(&v);
+        if let Some(ext) = file_ext {
+            name += ext.as_str();
+        }
+        let v_ent = (indode_of_path(OsStr::new(&v)),FileType::Symlink, name);
         entries.push(v_ent)
     }
 
@@ -38,7 +44,10 @@ pub fn get_playlist_elements(url: &String) -> Vec<String> {
     for line in String::from_utf8(out.stdout).expect("Could not convert output to utf8 string").split("\n") {
         if line.len() < 1 {continue;}
         let j = json::parse(line).expect("Could not parse json output of youtube_dl"); 
-        vids.push(j["url"].to_string())
+        let id = j["url"].to_string();
+        //let id_o = id_from_url(url);
+        //if let Some(id) = id_o { vids.push(id) }
+        vids.push(id);
     }
 
     return vids;

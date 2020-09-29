@@ -60,8 +60,7 @@ struct Ytdlfs;
 pub enum FsContent {
     Video(String),
     ChannelDir(String),
-    PlaylistDir(String),
-    PlaylistSym(String,String),
+    PlaylistDir(String,Option<String>),
 }
 
 lazy_static! {
@@ -104,7 +103,16 @@ impl Filesystem for Ytdlfs {
             reply.entry(&TTL, &attr, 0);
         } else if parent == 4 { // A playlist folder
             let ino = indode_of_path(name);
-            map.insert(ino, FsContent::PlaylistDir(String::from(name.to_str().unwrap())));
+            let id_and_ext = String::from(name.to_str().unwrap());
+            let (id,file_ext) = match id_and_ext.find("#") {
+                Some(mid) => {
+                    let (a,b_with_delimeter) = id_and_ext.split_at(mid);
+                    let b = b_with_delimeter.trim_start_matches(".");
+                    (String::from(a),Some(String::from(b)))
+                },
+                None => (id_and_ext, None),
+            };
+            map.insert(ino, FsContent::PlaylistDir(id,file_ext));
             
             let attr = FileAttr {
                 ino: ino, size: 4096, blocks: 1,
@@ -118,7 +126,7 @@ impl Filesystem for Ytdlfs {
                 content_o = map.get(&parent);
             }
             if let Some(content) = content_o {
-                if let FsContent::PlaylistDir(pl_id) = content {
+                if let FsContent::PlaylistDir(pl_id, file_ext) = content {
                     
                     let ino = indode_of_path(name);
                     map.insert(ino, FsContent::Video(String::from(name.to_str().unwrap())));
@@ -127,7 +135,7 @@ impl Filesystem for Ytdlfs {
                     let attr = FileAttr {
                         ino: ino, size: 1000000, blocks: 1,
                         atime: UNIX_EPOCH, mtime: UNIX_EPOCH, ctime: UNIX_EPOCH, crtime: UNIX_EPOCH,
-                        kind: FileType::RegularFile, perm: 0o644, nlink: 1, uid: 501, gid: 20, rdev: 0, flags: 0,
+                        kind: FileType::Symlink, perm: 0o644, nlink: 1, uid: 501, gid: 20, rdev: 0, flags: 0,
                     };
                     reply.entry(&TTL, &attr, 0);
                 } else {
@@ -153,7 +161,10 @@ impl Filesystem for Ytdlfs {
         match id {
             Some(c) => {
                 match c {
-                    FsContent::Video(i) => video::video_reply(reply, i, offset, size),
+                    FsContent::Video(i) => {
+                        if i.len() != 34 { return reply.error(ENOENT) };
+                        video::video_reply(reply, i, offset, size)
+                    },
                     _ => return reply.error(ENOENT)
                 }
             },
@@ -169,8 +180,8 @@ impl Filesystem for Ytdlfs {
         if ino != 1 {
             let map = INODES.lock().unwrap();
             if let Some(content) = map.get(&ino) {
-                if let FsContent::PlaylistDir(ch_id) = content {
-                    playlist::playlist_dir_reply(reply, offset, ch_id);
+                if let FsContent::PlaylistDir(ch_id, file_ext) = content {
+                    playlist::playlist_dir_reply(reply, offset, ch_id, file_ext);
                 } else { reply.error(ENOENT) }
             } else { reply.error(ENOENT) }
 
