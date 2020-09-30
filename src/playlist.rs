@@ -1,6 +1,4 @@
 
-use crate::video::id_from_url;
-use crate::INODES;
 use std::ffi::OsStr;
 use crate::indode_of_path;
 use std::process::Command;
@@ -12,7 +10,7 @@ pub fn playlist_url(id: &String) -> String {
     return format!("https://www.youtube.com/playlist?list={0}",id);
 }
 
-pub fn playlist_dir_reply(mut reply: ReplyDirectory, offset: i64, pl_id: &String, file_ext: &Option<String>) {
+pub fn playlist_dir_reply(mut reply: ReplyDirectory, offset: i64, pl_id: &String, file_ext: &Option<String>, video: &bool) {
     let mut entries = vec![
         (2, FileType::Directory, String::from(".")),
         (2, FileType::Directory, String::from("..")),
@@ -25,7 +23,8 @@ pub fn playlist_dir_reply(mut reply: ReplyDirectory, offset: i64, pl_id: &String
         if let Some(ext) = file_ext {
             name += ext.as_str();
         }
-        let v_ent = (indode_of_path(OsStr::new(&v)),FileType::Symlink, name);
+        let ino = indode_of_path(OsStr::new(&v)) + (if *video { 0 } else { 1 });
+        let v_ent = (ino,FileType::RegularFile, name);
         entries.push(v_ent)
     }
 
